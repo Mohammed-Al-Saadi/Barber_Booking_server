@@ -200,6 +200,8 @@ def create_booking():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+
+
 # route to set barber break time 
 @app.route('/set_barber_break_slots', methods=['POST'])
 def set_barber_break_slots():
