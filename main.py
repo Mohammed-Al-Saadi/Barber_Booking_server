@@ -54,9 +54,11 @@ def login():
     elif result == "invalid_password":
         return jsonify({'error': 'Incorrect password!'}), 401
     
+import pytz  # Import pytz for timezone conversion
 
+# Define the Finland timezone
+finland_tz = pytz.timezone('Europe/Helsinki')
 
-# route to protect dash
 @app.route('/protected', methods=['GET'])
 def protected_route():
     # Get the token from the Authorization header
@@ -70,18 +72,24 @@ def protected_route():
         token = token.split(" ")[1]
         data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
 
-        # Get the expiration date from the token
-        exp = datetime.utcfromtimestamp(data['exp']).strftime('%Y-%m-%d %H:%M:%S')
+        # Get the expiration timestamp from the token
+        exp_timestamp = data['exp']
+
+        # Convert the UTC expiration time to Finland time
+        utc_expiration = datetime.utcfromtimestamp(exp_timestamp)
+        finland_expiration = utc_expiration.replace(tzinfo=pytz.utc).astimezone(finland_tz)
+
+        # Format the expiration time for Finland
+        exp = finland_expiration.strftime('%Y-%m-%d %H:%M:%S')
 
         return jsonify({
-            'id':data["barber_id"],
-            'expiration_date': exp  # Include the expiration date
+            'id': data["barber_id"],
+            'expiration_date': exp  # Include the expiration date in Finland time
         })
     except jwt.ExpiredSignatureError:
         return jsonify({'message': 'Token has expired!'}), 401
     except jwt.InvalidTokenError:
         return jsonify({'message': 'Token is invalid!'}), 401
-
 
 
 #route get barber for the service and time slots

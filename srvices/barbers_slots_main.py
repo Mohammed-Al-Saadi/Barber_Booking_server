@@ -1,9 +1,9 @@
-
-# Function to generate barber specific slots with bookings
 from datetime import datetime, time, timedelta
-
+import pytz  # Import pytz for timezone conversion
 from database.db_config import get_existing_breaks_for_barber
 
+# Define the Finland timezone
+finland_tz = pytz.timezone('Europe/Helsinki')
 
 def generate_barber_specific_slots_with_bookings(
     barber_schedules, barber_dates, existing_bookings, barber_ids=None, 
@@ -26,7 +26,7 @@ def generate_barber_specific_slots_with_bookings(
         
         # If start_date or end_date is not provided, set default values
         if start_date is None:
-            start_date = datetime.now().date()  # Set start date to current date
+            start_date = datetime.now(tz=finland_tz).date()  # Set start date to current date in Finland timezone
         if end_date is None:
             end_date = start_date + timedelta(days=2)  # Set end date to 2 days from the start date
 
@@ -49,25 +49,24 @@ def generate_barber_specific_slots_with_bookings(
                 end_hour, end_minute = map(int, default_end_time.split(':'))
 
             # Create datetime objects for start and end times
-            start_time = datetime.combine(current_date, time(start_hour, start_minute))
-            end_time = datetime.combine(current_date, time(end_hour, end_minute))
+            start_time = datetime.combine(current_date, time(start_hour, start_minute), tzinfo=finland_tz)
+            end_time = datetime.combine(current_date, time(end_hour, end_minute), tzinfo=finland_tz)
             slots = []
 
             # Fetch bookings for this barber on this date
             barber_bookings = existing_bookings.get(barber_id, [])
-            barber_bookings_today = [(datetime.strptime(booking_time, '%Y-%m-%d %H:%M:%S'), service_duration) 
+            barber_bookings_today = [(datetime.strptime(booking_time, '%Y-%m-%d %H:%M:%S').replace(tzinfo=finland_tz), service_duration) 
                                      for booking_time, service_duration in barber_bookings 
                                      if datetime.strptime(booking_time, '%Y-%m-%d %H:%M:%S').date() == current_date]
 
             # Sort the bookings by appointment time
             barber_bookings_today.sort(key=lambda x: x[0])
 
-            # Get the current time
-            current_datetime = datetime.now()
+            # Get the current time in Finland timezone
+            current_datetime = datetime.now(tz=finland_tz)
 
             # Fetch barber's break times for this date
             break_times = get_existing_breaks_for_barber(barber_id, current_date)
-            #print(f"Barber breaks for {current_date_str}: {break_times}")
 
             # Generate slots while checking for bookings and breaks
             for booking_time, booking_duration in barber_bookings_today:
