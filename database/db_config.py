@@ -4,7 +4,7 @@ import os
 import traceback
 import psycopg2
 from psycopg2 import pool
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 
 # Database connection details
@@ -135,8 +135,6 @@ def get_barbers_for_service(service_names):
         print("Failed to connect to the database")
         return None
 
-data = get_barbers_for_service(service_names=["Hiustatuointi"])
-print(data)
 
 def get_service_id(service_names):
     """
@@ -429,130 +427,422 @@ def insert_booking(barber_id, service_id, customer_name, appointment_time, email
         return False, "An error occurred while creating the booking."
 
 
-
-
-
-
-def insert_barber_break_slot(barber_id, break_date, break_time):
+def update_booking_price(booking_id, new_price):
     """
-    Insert a break time slot into the BarberBreaks table.
+    Update the price of a booking in the Bookings table.
+
+    Parameters:
+    - booking_id (int): The ID of the booking to be updated.
+    - new_price (float): The new price to set for the booking.
+
+    Returns:
+    - A tuple (success, message), where success is a boolean indicating if the price was updated,
+      and message is a string indicating the result.
+    """
+    conn = get_connection()
+    if not conn:
+        print("Failed to connect to the database")
+        return False, "Failed to connect to the database."
+
+    try:
+        cursor = conn.cursor()
+
+        # Check if the booking exists
+        check_query = """
+            SELECT COUNT(*) FROM Bookings WHERE booking_id = %s;
+        """
+        cursor.execute(check_query, (booking_id,))
+        (booking_exists,) = cursor.fetchone()
+
+        if booking_exists == 0:
+            print(f"Booking ID {booking_id} does not exist.")
+            cursor.close()
+            release_connection(conn)
+            return False, "Booking ID does not exist."
+
+        # SQL query to update the price for the booking
+        update_query = """
+            UPDATE Bookings
+            SET price = %s
+            WHERE booking_id = %s;
+        """
+        # Execute the query with the new price and booking ID
+        cursor.execute(update_query, (new_price, booking_id))
+
+        # Commit the transaction
+        conn.commit()
+        print(f"Price updated successfully for booking ID {booking_id}.")
+
+        # Close the cursor and release the connection
+        cursor.close()
+        release_connection(conn)
+        print("Connection released successfully.")
+        
+        return True, "Booking price updated successfully."
+
+    except Exception as e:
+        print(f"Error occurred while updating booking price: {e}")
+        traceback.print_exc()
+        release_connection(conn)
+        return False, "An error occurred while updating the booking price."
+
+import traceback  # Ensure traceback is imported
+from datetime import timedelta
+
+def convert_timedelta_to_minutes(td):
+    """Converts a timedelta object to total minutes."""
+    if isinstance(td, timedelta):
+        total_minutes = int(td.total_seconds() // 60)
+        return total_minutes
+    return td  # If not a timedelta, return as is
+
+from datetime import datetime, timedelta
+import traceback
+
+def convert_timedelta_to_minutes(td):
+    """Convert timedelta or string representation of time to total minutes."""
+    if isinstance(td, str):
+        # If td is a string, convert it to a timedelta
+        hours, minutes, seconds = map(int, td.split(':'))
+        td = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    elif td is None:
+        return 0  # Handle None values
+    elif not isinstance(td, timedelta):
+        raise ValueError("Unsupported type for duration.")
+
+    return int(td.total_seconds() // 60)  # Convert seconds to minutes
+def get_bookings_from_today_onwards(barber_id):
+    """
+    Retrieve all columns from the Bookings table for a specific barber ID from today's date and onwards,
+    including service name, extra fields, extra service names, and estimated time in minutes.
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+
+    Returns:
+    - A tuple (success, result), where success is a boolean indicating if the operation was successful,
+      and result is either a list of bookings or an error message.
+    """
+    conn = get_connection()
+    if not conn:
+        print("Failed to connect to the database")
+        return False, "Failed to connect to the database."
+
+    try:
+        cursor = conn.cursor()
+
+        # SQL query to get all bookings for the barber from today's date and onwards
+        today_date = datetime.now().date()
+        query = """
+            SELECT 
+                B.booking_id, 
+                B.barber_id, 
+                B.service_id, 
+                S.service_name AS main_service_name,  -- Main service name
+                B.customer_name, 
+                B.appointment_time, 
+                B.email, 
+                B.phone, 
+                B.price, 
+                S.estimated_time AS estimated_time,  -- Assuming 'estimated_time' is the correct column name
+                ARRAY(
+                    SELECT json_build_object(
+                        'service_name', E.service_name,
+                        'duration', E.estimated_time
+                    )
+                    FROM Services E
+                    WHERE E.service_id = ANY(B.extra)
+                ) AS extra_services  -- Fetch the names of extra services as a JSON object
+            FROM 
+                Bookings B
+            JOIN 
+                Services S ON B.service_id = S.service_id  -- Join for main service name and duration
+            WHERE 
+                B.barber_id = %s 
+                AND DATE(B.appointment_time) >= %s  -- Retrieve bookings from today onwards
+            ORDER BY 
+                B.appointment_time ASC;  -- Order by appointment time ascending
+        """
+        
+        # Execute the query
+        cursor.execute(query, (barber_id, today_date))
+        bookings = cursor.fetchall()
+
+        # Format the bookings as a list of dictionaries
+        formatted_bookings = []
+        for booking in bookings:
+            # Get the main service estimated time in minutes
+            main_service_time = convert_timedelta_to_minutes(booking[9])
+
+            # Prepare extra services with their names only
+            extra_services = [
+                extra_service['service_name']
+                for extra_service in booking[10]  # booking[10] contains the array of extra services
+            ]
+
+            # Calculate total estimated time including extra services
+            total_estimated_time = main_service_time + sum(
+                convert_timedelta_to_minutes(extra_service['duration']) for extra_service in booking[10]
+            )
+
+            # Build the formatted booking dictionary including extra services
+            formatted_bookings.append({
+                'booking_id': booking[0],
+                'service_name': booking[3],       # Include main service name
+                'customer_name': booking[4],
+                'appointment_time': booking[5].strftime('%Y-%m-%d %H:%M:%S'),  # Format appointment time
+                'email': booking[6],
+                'phone': booking[7],
+                'price': booking[8],
+                'total_estimated_time': total_estimated_time,  # Total estimated time
+                'extra_services': extra_services  # Include only service names of extra services
+            })
+
+        # Close the cursor and release the connection
+        cursor.close()
+        release_connection(conn)
+
+        if bookings:
+            return True, formatted_bookings
+        else:
+            return True, "No bookings found from today onwards."
+
+    except Exception as e:
+        print(f"Error occurred while retrieving bookings: {e}")
+        traceback.print_exc()  # This will print the full traceback in the console
+        release_connection(conn)
+        return False, "An error occurred while fetching bookings."
+
+def insert_barber_break_slot(barber_id, break_date, break_times, timeType, booking_id=None):
+    """
+    Insert multiple break time slots into the BarberBreaks table.
 
     Parameters:
     - barber_id (int): The ID of the barber.
     - break_date (date): The date of the break.
-    - break_time (time): The specific time slot for the break.
+    - break_times (list of time): A list of specific time slots for the break.
+    - booking_id (int or None): The ID of the booking associated with the break, or None if not applicable.
+
+    Returns:
+    - bool: True if the insertion is successful for all times, False otherwise.
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
         query = """
-            INSERT INTO BarberBreaks (barber_id, break_date, break_time)
-            VALUES (%s, %s, %s)
+            INSERT INTO BarberBreaks (barber_id, break_date, break_time, type , booking_id)
+            VALUES (%s, %s, %s, %s, %s)
         """
-        cursor.execute(query, (barber_id, break_date, break_time))
+
+        # Loop through each time in the array and insert into the database
+        for break_time in break_times:
+            cursor.execute(query, (barber_id, break_date, break_time, timeType, booking_id))
+
+        # Commit the transaction if all insertions are successful
         conn.commit()
         cursor.close()
         release_connection(conn)
+        return True  # Indicate success
+    except Exception as e:
+        # Rollback the transaction in case of any error
+        if conn:
+            conn.rollback()
+        release_connection(conn)
+        print(f"Error inserting barber breaks: {e}")
+        return False  # Indicate failure
+
+def delete_barber_break(break_id):
+    """
+    Delete a break slot from the BarberBreaks table based on break_id.
+
+    Parameters:
+    - break_id (int): The ID of the break to delete.
+
+    Returns:
+    - bool: True if the deletion is successful, False otherwise.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        query = """
+            DELETE FROM BarberBreaks WHERE break_id = %s
+        """
+        cursor.execute(query, (break_id,))
+        conn.commit()
+        cursor.close()
+        release_connection(conn)
+        return True  # Indicate success
     except Exception as e:
         release_connection(conn)
-        print(f"Error inserting barber break: {e}")
+        print(f"Error deleting barber break: {e}")
+        return False  # Indicate failure
+
+from datetime import datetime, timedelta
+
+def round_up_to_next_15_minutes(dt):
+    """
+    Round a datetime object up to the next 15-minute interval.
+    """
+    if dt.minute % 15 == 0:
+        return dt
+    else:
+        return dt + timedelta(minutes=(15 - dt.minute % 15))
+
+import datetime
+from datetime import timedelta, datetime
+
+def round_up_to_next_15_minutes(dt):
+    """
+    Rounds the time to the next 15-minute interval.
+    """
+    discard = timedelta(minutes=dt.minute % 15, seconds=dt.second, microseconds=dt.microsecond)
+    return dt + (timedelta(minutes=15) - discard)
+
+def get_available_free_slots(barber_id, date):
+    """
+    Fetch available free time slots for a barber on a specific date, considering
+    service arrays in bookings (both main and extra services).
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+    - date (datetime.date or str): The date for which to check availability.
+
+    Returns:
+    - List of available time slots in "HH:MM" format.
+    """
+    # Ensure that date is a datetime.date object
+    if isinstance(date, str):
+        try:
+            date = datetime.strptime(date, '%Y-%m-%d').date()
+        except ValueError as e:
+            print(f"Error parsing date: {e}")
+            return []
+
+    # Get the current time
+    now = datetime.now()
+
+    conn = get_connection()
+    if not conn:
+        print("Failed to connect to the database")
+        return []
+
+    try:
+        cursor = conn.cursor()
+
+        # 1. Fetch the barber's working hours from BarberSchedules
+        cursor.execute("""
+            SELECT start_time, end_time 
+            FROM BarberSchedules 
+            WHERE barber_id = %s
+        """, (barber_id,))
+        schedule = cursor.fetchone()
+
+        if not schedule:
+            print(f"No schedule found for barber ID {barber_id}")
+            return []
+
+        start_time, end_time = schedule
+        start_time = datetime.combine(date, start_time)
+        end_time = datetime.combine(date, end_time)
+
+        # If the date is today, adjust the start time to be at least the current time
+        if date == now.date() and start_time < now:
+            start_time = now
+
+        # Round start_time to the next nearest 15-minute interval
+        start_time = round_up_to_next_15_minutes(start_time)
+
+        # 2. Fetch barber's breaks for the specific date
+        cursor.execute("""
+            SELECT break_time 
+            FROM BarberBreaks
+            WHERE barber_id = %s AND break_date = %s
+        """, (barber_id, date))
+        breaks = cursor.fetchall()
+
+        # Convert the fetched break times into datetime objects
+        break_times = [datetime.combine(date, break_time[0]) for break_time in breaks]
+
+        # 3. Fetch existing bookings for the barber on the specified date, including extra services
+        cursor.execute("""
+            SELECT appointment_time, s.estimated_time, b.extra
+            FROM Bookings b
+            JOIN Services s ON b.service_id = s.service_id
+            WHERE b.barber_id = %s AND DATE(b.appointment_time) = %s
+        """, (barber_id, date))
+        bookings = cursor.fetchall()
+
+        booked_slots = []
+        for appointment_time, estimated_time, extra_services in bookings:
+            booking_start = appointment_time
+            total_estimated_time = estimated_time
+
+            # If there are extra services, fetch their estimated times and add them
+            if extra_services:
+                extra_service_ids = tuple(extra_services)  # assuming extra_services is an array of service IDs
+                if extra_service_ids:  # ensure extra_service_ids is not empty
+                    cursor.execute("""
+                        SELECT estimated_time
+                        FROM Services
+                        WHERE service_id IN %s
+                    """, (extra_service_ids,))
+                    extra_times = cursor.fetchall()
+
+                    # Add the estimated times of all extra services
+                    for extra_time in extra_times:
+                        total_estimated_time += extra_time[0]  # Assuming extra_time is a timedelta
+
+            booking_end = booking_start + total_estimated_time
+            booked_slots.append((booking_start, booking_end))
+
+        # 4. Generate time slots in increments (e.g., every 15 minutes)
+        current_time = start_time
+        available_slots = []
+
+        # Adjust the condition to ensure the last slot is included
+        while current_time < end_time:
+            slot_end_time = current_time + timedelta(minutes=15)
+
+            # Debugging: print the current slot being checked
+            print(f"Checking slot: {current_time.strftime('%H:%M')} - {slot_end_time.strftime('%H:%M')}")
+
+            # Check if the time slot overlaps with any booked slots
+            overlap = False
+            for booking_start, booking_end in booked_slots:
+                print(f"Comparing with booking: {booking_start.strftime('%H:%M')} - {booking_end.strftime('%H:%M')}")
+                if (current_time < booking_end) and (slot_end_time > booking_start):
+                    print(f"Overlap with booking {booking_start.strftime('%H:%M')} - {booking_end.strftime('%H:%M')}")
+                    overlap = True
+                    break
+
+            # Check if the time slot overlaps with any break slots
+            for break_time in break_times:
+                print(f"Comparing with break: {break_time.strftime('%H:%M')}")
+                if (current_time <= break_time < slot_end_time) or (break_time <= current_time < break_time + timedelta(minutes=15)):
+                    print(f"Overlap with break at {break_time.strftime('%H:%M')}")
+                    overlap = True
+                    break
+
+            # Only add slots that are in the future (from the current time onwards) and have no overlaps
+            if not overlap and current_time >= now:
+                available_slots.append(current_time.strftime('%H:%M'))
+
+            current_time += timedelta(minutes=15)
+
+        # Close the cursor and connection
+        cursor.close()
+        release_connection(conn)
+
+        return available_slots
+
+    except Exception as e:
+        print(f"Error occurred while fetching available slots: {e}")
+        if conn:
+            release_connection(conn)
+        return []
 
 
 
-
-# def get_available_free_slots(barber_id, date):
-#     """
-#     Fetch available free time slots for a barber on a specific date.
-    
-#     Parameters:
-#     - barber_id (int): The ID of the barber.
-#     - date (datetime.date): The date for which to check availability.
-    
-#     Returns:
-#     - List of available time slots in "HH:MM" format.
-#     """
-#     conn = get_connection()
-#     if not conn:
-#         print("Failed to connect to the database")
-#         return []
-
-#     try:
-#         cursor = conn.cursor()
-
-#         # 1. Fetch the barber's working hours from BarberSchedules
-#         cursor.execute("""
-#             SELECT start_time, end_time 
-#             FROM BarberSchedules 
-#             WHERE barber_id = %s
-#         """, (barber_id,))
-#         schedule = cursor.fetchone()
-
-#         if not schedule:
-#             print(f"No schedule found for barber ID {barber_id}")
-#             return []
-
-#         start_time, end_time = schedule
-#         start_time = datetime.combine(date, start_time)
-#         end_time = datetime.combine(date, end_time)
-
-#         # 2. Fetch barber's breaks for the specific date
-#         cursor.execute("""
-#             SELECT break_time 
-#             FROM BarberBreaks
-#             WHERE barber_id = %s AND break_date = %s
-#         """, (barber_id, date))
-#         breaks = cursor.fetchall()
-
-#         break_times = [datetime.combine(date, break_time[0]) for break_time in breaks]
-
-#         # 3. Fetch existing bookings for the barber on the specified date
-#         cursor.execute("""
-#             SELECT appointment_time, s.estimated_time
-#             FROM Bookings b
-#             JOIN Services s ON b.service_id = s.service_id
-#             WHERE b.barber_id = %s AND DATE(b.appointment_time) = %s
-#         """, (barber_id, date))
-#         bookings = cursor.fetchall()
-
-#         booked_slots = []
-#         for appointment_time, estimated_time in bookings:
-#             booking_start = appointment_time
-#             booking_end = booking_start + estimated_time
-#             booked_slots.append((booking_start, booking_end))
-
-#         # 4. Generate time slots in increments (e.g., every 15 minutes)
-#         current_time = start_time
-#         available_slots = []
-
-#         while current_time + timedelta(minutes=15) <= end_time:
-#             slot_end_time = current_time + timedelta(minutes=15)
-
-#             # Check if the time slot overlaps with any booked slots or break slots
-#             overlap = False
-#             for booking_start, booking_end in booked_slots:
-#                 if (current_time < booking_end) and (slot_end_time > booking_start):
-#                     overlap = True
-#                     break
-
-#             if current_time in break_times:
-#                 overlap = True
-
-#             if not overlap:
-#                 available_slots.append(current_time.strftime('%H:%M'))
-
-#             current_time += timedelta(minutes=15)
-
-#         # Close the cursor and connection
-#         cursor.close()
-#         release_connection(conn)
-
-#         return available_slots
-
-#     except Exception as e:
-#         print(f"Error occurred while fetching available slots: {e}")
-#         if conn:
-#             release_connection(conn)
-#         return []
 
 
 
@@ -606,7 +896,8 @@ def get_bookings_for_barber(barber_id, date):
         print(f"Error occurred while fetching bookings for barber {barber_id}: {e}")
         release_connection(conn)
         return []
-    
+
+
 def get_existing_breaks_for_barber(barber_id, break_date):
     """
     Fetch all existing break slots for a barber on a given date.
@@ -727,3 +1018,491 @@ def verify_user(username, password):
     finally:
         cur.close()
         conn.close()
+
+
+from datetime import datetime
+def get_barber_breaks(barber_id, break_type=None):
+    """
+    Retrieve all columns from the BarberBreaks table for a specific barber ID,
+    returning only breaks from today's date onward. If break_type is provided,
+    it will filter by the break type.
+    
+    Parameters:
+    - barber_id (int): The ID of the barber.
+    - break_type (str or None): The type of break to filter by (e.g., "Extend", "Break").
+    
+    Returns:
+    - tuple (bool, result): Success status and list of breaks or error message.
+    """
+    conn = get_connection()
+    if not conn:
+        print("Failed to connect to the database")
+        return False, "Failed to connect to the database."
+
+    try:
+        cursor = conn.cursor()
+        
+        # Get today's date
+        today = datetime.now().date()
+        
+        # Query to select breaks from today onward, with optional filtering by type
+        if break_type:
+            query = """
+            SELECT * FROM BarberBreaks 
+            WHERE barber_id = %s AND break_date >= %s AND type = %s;
+            """
+            cursor.execute(query, (barber_id, today, break_type))
+        else:
+            query = """
+            SELECT * FROM BarberBreaks 
+            WHERE barber_id = %s AND break_date >= %s;
+            """
+            cursor.execute(query, (barber_id, today))
+
+        breaks = cursor.fetchall()
+
+        formatted_breaks = []
+        if breaks:
+            for break_ in breaks:
+                # Fetch the break_date and break_time
+                break_id = break_[0]
+                barber_id = break_[1]
+                break_date = break_[2]  # This should be a date object
+                break_time = break_[3]   # This should be a time object
+                type_ = break_[4]        # The break type (Extend, Break, etc.)
+                booking_id = break_[5]        # The break type (Extend, Break, etc.)
+
+                
+                # # Debug: Print the values before formatting
+                # print(f"Break ID: {break_id}, Barber ID: {barber_id}, Break Date: {break_date}, Break Time: {break_time}, Type: {type_}")
+                
+                # Format break_time and break_date
+                formatted_breaks.append({
+                    'break_id': break_id,
+                    'booking_id': booking_id,
+
+                    'barber_id': barber_id,
+                    'break_time': break_time.strftime('%H:%M:%S') if break_time else "N/A",
+                    'break_date': break_date.strftime('%d.%m.%Y') if break_date else "N/A",
+                    'type': type_ if type_ else "N/A"  # Include the break type
+                })
+
+        cursor.close()
+        release_connection(conn)
+
+        return True, formatted_breaks if formatted_breaks else "No future breaks found for this barber."
+
+    except Exception as e:
+        print(f"Error occurred while retrieving breaks: {e}")
+        traceback.print_exc()
+        release_connection(conn)
+        return False, "An error occurred while fetching breaks."
+
+
+def get_barber_name_by_id(barber_id):
+    """
+    Fetch the barber's name from the barbers table using the barber_id.
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+
+    Returns:
+    - str: The name of the barber, or None if no barber is found.
+    """
+    conn = get_connection()
+    if not conn:
+        print("Failed to connect to the database")
+        return None
+    
+    try:
+        cur = conn.cursor()
+
+        # Query to get the barber's name by barber_id
+        cur.execute("""
+            SELECT name FROM barbers
+            WHERE barber_id = %s
+        """, (barber_id,))  # Safely passing barber_id as a parameter to avoid SQL injection
+
+        result = cur.fetchone()
+        cur.close()
+
+        if result:
+            return result[0]  # Return the barber's name
+        else:
+            return None  # Return None if no barber was found
+
+    except Exception as e:
+        print(f"Error occurred while fetching the barber's name: {e}")
+        return None
+
+    finally:
+        # Release the connection back to the pool
+        release_connection(conn)
+
+
+
+def get_barber_schedule(barber_id):
+    """
+    Fetch the start and end times for a barber based on barber_id.
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+
+    Returns:
+    - tuple: A tuple containing the start_time and end_time, or None if not found.
+    """
+    conn = get_connection()
+    if not conn:
+        print("Failed to connect to the database")
+        return None
+
+    try:
+        cur = conn.cursor()
+
+        # SQL query to get the start and end times from BarberSchedules
+        cur.execute("""
+            SELECT start_time, end_time 
+            FROM BarberSchedules 
+            WHERE barber_id = %s
+        """, (barber_id,))
+
+        # Fetch the result
+        result = cur.fetchone()
+        cur.close()
+
+        if result:
+            return result  # Return tuple (start_time, end_time)
+        else:
+            return None  # No schedule found for the barber
+
+    except Exception as e:
+        print(f"Error occurred while fetching the barber schedule: {e}")
+        return None
+
+    finally:
+        release_connection(conn)
+
+
+def update_barber_schedule(barber_id, start_time, end_time):
+    """
+    Update the start and end times for a barber based on barber_id.
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+    - start_time (str): The new start time (in 'HH:MM:SS' format).
+    - end_time (str): The new end time (in 'HH:MM:SS' format).
+
+    Returns:
+    - bool: True if the update was successful, False otherwise.
+    """
+    conn = get_connection()
+    if not conn:
+        print("Failed to connect to the database")
+        return False
+
+    try:
+        cur = conn.cursor()
+
+        # SQL query to update the start and end times
+        cur.execute("""
+            UPDATE BarberSchedules
+            SET start_time = %s, end_time = %s
+            WHERE barber_id = %s
+        """, (start_time, end_time, barber_id))
+
+        # Commit the transaction to apply the changes
+        conn.commit()
+
+        cur.close()
+        return True  # Return True if the update was successful
+
+    except Exception as e:
+        print(f"Error occurred while updating the barber schedule: {e}")
+        return False
+
+    finally:
+        release_connection(conn)
+
+
+from datetime import datetime
+
+def get_barber_exceptions(barber_id):
+    """
+    Fetch all future barber exceptions starting from the current day.
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+
+    Returns:
+    - list: A list of dictionaries representing the rows fetched from BarberExceptions.
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+
+        # SQL query to get future barber exceptions
+        cur.execute("""
+            SELECT barber_id, exception_date, custom_start_time, custom_end_time, is_off
+            FROM BarberExceptions
+            WHERE barber_id = %s AND exception_date >= CURRENT_DATE
+            ORDER BY exception_date ASC
+        """, (barber_id,))
+
+        # Fetch all the rows
+        results = cur.fetchall()
+        cur.close()
+
+        # Format the results into a list of dictionaries for JSON serialization
+        exceptions = []
+        for result in results:
+            exceptions.append({
+                "barber_id": result[0],
+                "exception_date": result[1].strftime("%Y-%m-%d"),  # Convert date to string
+                "custom_start_time": result[2].strftime("%H:%M:%S") if result[2] else None,  # Convert time to string
+                "custom_end_time": result[3].strftime("%H:%M:%S") if result[3] else None,  # Convert time to string
+                "is_off": result[4]
+            })
+
+        return exceptions  # Return the list of formatted exceptions
+
+    except Exception as e:
+        print(f"Error occurred while fetching barber exceptions: {e}")
+        return None
+
+    finally:
+        release_connection(conn)
+
+def insert_barber_exception(barber_id, exception_date, custom_start_time=None, custom_end_time=None, is_off=False):
+    """
+    Insert a new record into the BarberExceptions table for a specific barber.
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+    - exception_date (str): The date of the exception (format: 'YYYY-MM-DD').
+    - custom_start_time (str or None): The custom start time for that date (format: 'HH:MM:SS'). None if it's a day off.
+    - custom_end_time (str or None): The custom end time for that date (format: 'HH:MM:SS'). None if it's a day off.
+    - is_off (bool): Whether the barber is off on that date (True for day off, False for custom hours).
+
+    Returns:
+    - bool: True if the insert was successful, False otherwise.
+    """
+    conn = get_connection()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+
+        # SQL query to insert a new record into the BarberExceptions table
+        cur.execute("""
+            INSERT INTO BarberExceptions (barber_id, exception_date, custom_start_time, custom_end_time, is_off)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (barber_id, exception_date)
+            DO UPDATE SET custom_start_time = EXCLUDED.custom_start_time,
+                          custom_end_time = EXCLUDED.custom_end_time,
+                          is_off = EXCLUDED.is_off
+        """, (barber_id, exception_date, custom_start_time, custom_end_time, is_off))
+
+        # Commit the transaction to apply the changes
+        conn.commit()
+
+        cur.close()
+        return True  # Return True if the insert was successful
+
+    except Exception as e:
+        print(f"Error occurred while inserting barber exception: {e}")
+        return False
+
+    finally:
+        release_connection(conn)
+
+
+
+
+
+def get_barber_data(barber_id):
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Query to fetch all data from bookings, barberbreaks, and barberexceptions based on barber_id
+        query = """
+        SELECT 
+            b.booking_id, b.barber_id, b.service_id, b.customer_name, b.appointment_time, 
+            b.email, b.phone, b.price, b.extra_charge, b.extra,
+            br.break_id, br.break_date, br.break_time, br.type, br.booking_id AS break_booking_id,
+            be.exception_date, be.custom_start_time, be.custom_end_time, be.is_off
+        FROM 
+            bookings b
+        LEFT JOIN 
+            barberbreaks br ON b.barber_id = br.barber_id
+        LEFT JOIN 
+            barberexceptions be ON b.barber_id = be.barber_id
+        WHERE 
+            b.barber_id = %s;
+        """
+        cursor.execute(query, (barber_id,))
+        results = cursor.fetchall()
+
+        # Fetch column names for readability
+        colnames = [desc[0] for desc in cursor.description]
+        
+        # Formatting the result
+        data = [dict(zip(colnames, row)) for row in results]
+
+        return data
+    
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+from datetime import timedelta
+
+def get_appointments_and_breaks(barber_id, selected_date):
+    """
+    Fetch appointment times from the bookings table, break date/time and type from the barberbreaks table,
+    start/end time from the BarberSchedules table, and exception times from BarberExceptions.
+
+    Parameters:
+    - barber_id (int): The ID of the barber.
+    - selected_date (datetime.date): The date for which to fetch appointments.
+    
+    Returns:
+    - List of dictionaries containing separate date and time for appointments, breaks (as a list),
+      the final start_time and end_time, and calculated appointment end time.
+    """
+    conn = get_connection()  # Assuming you have a function to get the database connection
+    if not conn:
+        print("Failed to connect to the database")
+        return []
+
+    try:
+        cursor = conn.cursor()
+
+        # SQL query to fetch appointments, breaks, schedules, exceptions, and services
+        query = """
+            SELECT 
+                b.appointment_time, 
+                b.service_id,
+                b.extra,
+                bb.break_date, 
+                bb.break_time,
+                bb.type AS break_type,
+                bs.start_time, 
+                bs.end_time,
+                be.exception_date, 
+                be.custom_start_time, 
+                be.custom_end_time, 
+                be.is_off,
+                s.estimated_time AS primary_estimated_time
+            FROM 
+                bookings b
+            LEFT JOIN 
+                barberbreaks bb ON b.barber_id = bb.barber_id
+            JOIN 
+                BarberSchedules bs ON b.barber_id = bs.barber_id
+            LEFT JOIN 
+                BarberExceptions be ON b.barber_id = be.barber_id AND DATE(b.appointment_time) = be.exception_date
+            JOIN 
+                Services s ON b.service_id = s.service_id
+            WHERE 
+                b.barber_id = %s AND DATE(b.appointment_time) = %s;
+        """
+        cursor.execute(query, (barber_id, selected_date))
+        results = cursor.fetchall()
+
+        appointments_dict = {}
+
+        # Loop through the query result
+        for row in results:
+            appointment_time, service_id, extra, break_date, break_time, break_type, start_time, end_time, exception_date, custom_start_time, custom_end_time, is_off, primary_estimated_time = row
+
+            # Ensure primary_estimated_time is an integer representing minutes
+            if isinstance(primary_estimated_time, timedelta):
+                primary_estimated_time = int(primary_estimated_time.total_seconds() // 60)
+
+            # Format the final start and end time based on the exception or regular schedule
+            if exception_date and not is_off:
+                final_start_time = custom_start_time.strftime('%H:%M:%S') if custom_start_time else start_time.strftime('%H:%M:%S')
+                final_end_time = custom_end_time.strftime('%H:%M:%S') if custom_end_time else end_time.strftime('%H:%M:%S')
+            else:
+                final_start_time = start_time.strftime('%H:%M:%S')
+                final_end_time = end_time.strftime('%H:%M:%S')
+
+            # Split the appointment_time into date and time
+            appointment_date = appointment_time.strftime('%Y-%m-%d')
+            appointment_only_time = appointment_time.strftime('%H:%M:%S')
+
+            # Calculate the total estimated time
+            total_estimated_time = primary_estimated_time  # Start with the primary service time
+
+            # If there are extra services, calculate the estimated time for each
+            if extra and isinstance(extra, list):  # Check if 'extra' is a list
+                extra_service_ids = tuple(map(int, extra))  # Convert the extra services to integers
+                if extra_service_ids:
+                    extra_services_query = """
+                        SELECT SUM(estimated_time)
+                        FROM Services
+                        WHERE service_id IN %s;
+                    """
+                    cursor.execute(extra_services_query, (extra_service_ids,))
+                    extra_estimated_time = cursor.fetchone()[0] or 0
+
+                    # Ensure extra_estimated_time is treated as an integer
+                    if isinstance(extra_estimated_time, timedelta):
+                        extra_estimated_time = int(extra_estimated_time.total_seconds() // 60)
+
+                    total_estimated_time += extra_estimated_time
+
+            # Calculate the appointment end time by adding the total estimated time (in minutes) to the appointment start time
+            appointment_end_time = appointment_time + timedelta(minutes=total_estimated_time)
+
+            # Group the appointments by appointment_date
+            if appointment_date not in appointments_dict:
+                appointments_dict[appointment_date] = {
+                    "date": appointment_date,
+                    "appointments": []
+                }
+
+            # Check if this appointment already exists (use time as a key)
+            existing_appointment = next(
+                (a for a in appointments_dict[appointment_date]["appointments"] if a["appointment_time"] == appointment_only_time), None
+            )
+
+            if not existing_appointment:
+                # Add this appointment to the list
+                appointments_dict[appointment_date]["appointments"].append({
+                    "appointment_time": appointment_only_time,
+                    "appointment_end_time": appointment_end_time.strftime('%H:%M:%S'),  # Convert end time to a string
+                    "breaks": [],
+                    "start_time": final_start_time,
+                    "end_time": final_end_time,
+                    "is_off": is_off
+                })
+                existing_appointment = appointments_dict[appointment_date]["appointments"][-1]
+
+            # If there's a break, append it to the current appointment's "breaks" list
+            if break_date and break_time and break_type:
+                existing_appointment["breaks"].append({
+                    "break_date": break_date.strftime('%Y-%m-%d'),
+                    "break_time": break_time.strftime('%H:%M:%S'),
+                    "break_type": break_type
+                })
+
+        cursor.close()
+        release_connection(conn)
+
+        # Return the grouped appointments with date and time split, and calculated appointment end time
+        return list(appointments_dict.values())
+
+    except Exception as e:
+        print(f"Error occurred while fetching data for barber {barber_id}: {e}")
+        release_connection(conn)
+        return []

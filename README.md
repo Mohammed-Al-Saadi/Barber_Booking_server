@@ -113,7 +113,7 @@ This is a Flask-based API for managing barber bookings, providing functionalitie
 
 ## Installation
 
-pip install -r req.txt
+pip3 install -r req.txt --break-system-packages
 
 ### Prerequisites
 

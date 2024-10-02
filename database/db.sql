@@ -67,8 +67,7 @@ CREATE TABLE BarberExceptions (
 CREATE TABLE BarberBreaks (
     break_id SERIAL PRIMARY KEY,
     barber_id INT REFERENCES Barbers(barber_id),
-    break_start_time TIMESTAMP,
-    break_end_time TIMESTAMP,
+    break_time TIMESTAMP,
     break_date DATE
 );
 
