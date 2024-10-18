@@ -1,5 +1,6 @@
 from datetime import datetime, time, timedelta
-from database.db_config import get_existing_breaks_for_barber
+
+from database.get_existing_breaks_for_barber.get_existing_breaks_for_barber import get_existing_breaks_for_barber
 
 def generate_barber_specific_slots_with_bookings(
     barber_schedules, barber_dates, existing_bookings, barber_ids=None, 
@@ -22,9 +23,9 @@ def generate_barber_specific_slots_with_bookings(
         
         # If start_date or end_date is not provided, set default values
         if start_date is None:
-            start_date = datetime.now().date()  # Set start date to current date
+            start_date = datetime.now().date()  
         if end_date is None:
-            end_date = start_date + timedelta(days=10)  # Set end date to 2 days from the start date
+            end_date = start_date + timedelta(days=10)  
 
         current_date = start_date
 
