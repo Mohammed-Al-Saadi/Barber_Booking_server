@@ -265,7 +265,7 @@ The API is designed for scalability, allowing barbershop owners to manage multip
 
 ## Installation
 
-Follow these steps to install and set up the API:
+pip install -r req.txt
 
 ### Prerequisites
 
@@ -275,8 +275,17 @@ Follow these steps to install and set up the API:
 
 ### Environment Setup
 
+Before starting the application, you need to set up environment variables to configure the database connection. Create a `.env` file in the root directory of your project with the following content:
+
+````bash
+DB_USER=
+DB_PASSWORD=
+DB_HOST=
+DB_PORT=
+DB_NAME=
+
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/yourusername/barber-booking-system.git
    cd barber-booking-system
-   ```
+````
