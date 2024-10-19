@@ -1,14 +1,17 @@
-
 import psycopg2
 from psycopg2 import pool
+from dotenv import load_dotenv
+import os
 
+# Load environment variables from .env file
+load_dotenv()
 
-# Database connection details
-DB_USER = "postgres.sbunvfcoqpecuahweiik"
-DB_PASSWORD = "goQqob-rygxof-hundu4"
-DB_HOST = "aws-0-eu-central-2.pooler.supabase.com"
-DB_PORT = "6543"
-DB_NAME = "postgres"
+# Database connection details from environment variables
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
 
 # Initialize connection_pool globally
 connection_pool = None
@@ -19,7 +22,7 @@ def initialize_connection_pool(minconn=1, maxconn=10):
     try:
         if connection_pool is None:
             connection_pool = psycopg2.pool.SimpleConnectionPool(
-                minconn, maxconn,  # Min and max connections in the pool
+                minconn, maxconn,  
                 user=DB_USER,
                 password=DB_PASSWORD,
                 host=DB_HOST,
@@ -57,4 +60,3 @@ def close_connection_pool():
             print("Connection pool closed")
     except Exception as e:
         print(f"Error occurred while closing connection pool: {e}")
-
