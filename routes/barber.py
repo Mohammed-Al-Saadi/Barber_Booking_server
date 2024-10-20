@@ -87,7 +87,7 @@ def set_barber_break_slots():
         data = request.json
         barber_id = data['barber_id']
         break_date = datetime.fromisoformat(data['break_date']).date()
-        break_slots = data['break_slots']  # List of break slots in "HH:MM" format
+        break_slots = data['break_slots'] 
 
         # Ensure that the time slots are valid and don't overlap with existing bookings
         existing_bookings = get_bookings_for_barber(barber_id, break_date)
@@ -97,7 +97,7 @@ def set_barber_break_slots():
             # Check if the selected break slot overlaps with existing bookings
             for booking in existing_bookings:
                 appointment_time = booking['appointment_time']
-                service_duration = timedelta(minutes=booking['service_duration'])  # Corrected timedelta usage
+                service_duration = timedelta(minutes=booking['service_duration']) 
                 booking_end_time = appointment_time + service_duration
 
                 if break_time >= appointment_time and break_time < booking_end_time:

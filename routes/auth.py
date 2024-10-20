@@ -43,10 +43,10 @@ def login():
     if not username or not password:
         return jsonify({'error': 'Username and password are required!'}), 400
 
-    result, barber_id = verify_user(username, password)  # Ensure verify_user returns barber_id
+    result, barber_id = verify_user(username, password) 
 
     if result == "login_success":
-        token = generate_token(barber_id)  # Generate a token with barber_id
+        token = generate_token(barber_id) 
         return jsonify({'message': 'Login successful!', 'token': token}), 200
     elif result == "user_not_found":
         return jsonify({'error': 'Username does not exist!'}), 404
@@ -95,7 +95,7 @@ def protected_route():
         return jsonify({
             'barber_id': barber_id,
             'barber_name': barber_name,
-            'expiration_date': exp  # Include the expiration date in Finland time
+            'expiration_date': exp  
         })
 
     except jwt.ExpiredSignatureError:

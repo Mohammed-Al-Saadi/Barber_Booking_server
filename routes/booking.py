@@ -53,5 +53,5 @@ def get_todays_bookings():
     except Exception as e:
         # Log the specific error message
         print(f"Error occurred in /get_todays_bookings route: {e}")
-        traceback.print_exc()  # This will print the full traceback in the console
+        traceback.print_exc() 
         return jsonify({'error': f"An internal error occurred: {str(e)}"}), 500

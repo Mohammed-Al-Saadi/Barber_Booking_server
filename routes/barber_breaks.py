@@ -15,7 +15,7 @@ def barber_breaks_route():
     Optionally filters by break type if 'type' is provided.
     """
     barber_id = request.args.get('barber_id', type=int)
-    break_type = request.args.get('type')  # Optional type parameter
+    break_type = request.args.get('type') 
 
     if barber_id is None:
         return jsonify({"success": False, "message": "barber_id is required"}), 400
@@ -81,7 +81,7 @@ def add_barber_break_slot():
             return jsonify({"success": False, "message": "Failed to add break slots."}), 500
 
     except Exception as e:
-        print(f"Error in add_barber_break_slot: {e}")  # Log the error
+        print(f"Error in add_barber_break_slot: {e}")  
         return jsonify({"success": False, "message": "An error occurred."}), 500
     
 
